@@ -1,0 +1,132 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+)
+
+type Provider int
+
+const (
+	Claude Provider = iota
+	Codex
+)
+
+func (p Provider) String() string {
+	if p == Codex {
+		return "Codex"
+	}
+	return "Claude"
+}
+
+// Account is one login, isolated by its own config dir.
+type Account struct {
+	Provider Provider
+	Email    string
+	// Dir is the absolute CLAUDE_CONFIG_DIR / CODEX_HOME. Empty means the
+	// provider's stock dir (~/.claude or ~/.codex) with the variable unset.
+	Dir string
+
+	mu sync.Mutex // serializes fetch+refresh so two refreshes never race
+}
+
+// accounts is loaded from the config file at startup.
+var accounts []*Account
+
+func home() string { h, _ := os.UserHomeDir(); return h }
+
+// envDir is the value for CLAUDE_CONFIG_DIR / CODEX_HOME, or "" for default.
+func (a *Account) envDir() string { return a.Dir }
+
+// dataDir is where the account's files live, default or not.
+func (a *Account) dataDir() string {
+	if a.Dir != "" {
+		return a.Dir
+	}
+	if a.Provider == Codex {
+		return filepath.Join(home(), ".codex")
+	}
+	return filepath.Join(home(), ".claude")
+}
+
+func (a *Account) envVar() string {
+	if a.Provider == Codex {
+		return "CODEX_HOME"
+	}
+	return "CLAUDE_CONFIG_DIR"
+}
+
+// Env is the environment for running the provider's CLI as this account.
+// API keys are stripped so login and usage go through the subscription.
+func (a *Account) Env() []string {
+	drop := []string{"CLAUDE_CONFIG_DIR=", "CODEX_HOME=", "ANTHROPIC_API_KEY=", "OPENAI_API_KEY="}
+	var env []string
+outer:
+	for _, kv := range os.Environ() {
+		for _, p := range drop {
+			if strings.HasPrefix(kv, p) {
+				continue outer
+			}
+		}
+		env = append(env, kv)
+	}
+	if d := a.envDir(); d != "" {
+		env = append(env, a.envVar()+"="+d)
+	}
+	return env
+}
+
+// LoginCmd returns the interactive login command for this account.
+func (a *Account) LoginCmd() *exec.Cmd {
+	var c *exec.Cmd
+	if a.Provider == Codex {
+		// Force file storage so the dashboard can read auth.json.
+		c = exec.Command("codex", "login", "-c", `cli_auth_credentials_store="file"`)
+	} else {
+		c = exec.Command("claude", "auth", "login")
+	}
+	c.Env = a.Env()
+	return c
+}
+
+// Limit is one rate-limit window.
+type Limit struct {
+	Label    string
+	Percent  float64
+	ResetsAt time.Time
+	Active   bool
+}
+
+type Usage struct {
+	Plan   string
+	Limits []Limit
+}
+
+// errLoggedOut means there are no usable credentials: none stored, or the
+// refresh token was rejected. The fix is to log in again.
+var errLoggedOut = errors.New("logged out")
+
+// errUnauthorized is returned by usage fetchers on HTTP 401.
+var errUnauthorized = errors.New("unauthorized")
+
+// Fetch returns usage, refreshing the access token first if it has expired
+// or the server rejects it. Refreshed tokens are saved back so the CLI
+// picks them up too.
+func (a *Account) Fetch(ctx context.Context) (*Usage, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.Provider == Codex {
+		return fetchCodex(ctx, a)
+	}
+	return fetchClaude(ctx, a)
+}
+
+func tokenExpired(exp time.Time) bool {
+	return !exp.IsZero() && time.Until(exp) < time.Minute
+}
