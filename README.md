@@ -103,3 +103,7 @@ meter -every 30s            # override the refresh interval
   you sign in with your subscription, not API billing.
 
 Both usage endpoints are undocumented and may change without notice.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
