@@ -23,10 +23,10 @@ type usageMsg struct {
 	gen   int
 	usage *Usage
 	err   error
-	at    time.Time
 }
 
 type refreshTickMsg struct{ gen int }
+type retryMsg struct{ idx int }
 type clockTickMsg time.Time
 type loginDoneMsg struct {
 	idx int
@@ -62,14 +62,16 @@ func (m *model) fetch(i int) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		u, err := a.Fetch(ctx)
-		return usageMsg{idx: i, gen: gen, usage: u, err: err, at: time.Now()}
+		return usageMsg{idx: i, gen: gen, usage: u, err: err}
 	}
 }
 
 func (m *model) fetchAll() tea.Cmd {
-	cmds := make([]tea.Cmd, len(accounts))
+	var cmds []tea.Cmd
 	for i := range accounts {
-		cmds[i] = m.fetch(i)
+		if !m.rows[i].fetching { // don't stack requests behind one in flight
+			cmds = append(cmds, m.fetch(i))
+		}
 	}
 	return tea.Batch(cmds...)
 }
@@ -116,17 +118,29 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.gen != r.gen {
 			return m, nil
 		}
-		r.fetching, r.err, r.at = false, msg.err, msg.at
-		if msg.err == nil {
-			r.usage = msg.usage
-		} else if errors.Is(msg.err, errLoggedOut) {
-			r.usage = nil
+		r.fetching, r.err = false, msg.err
+		switch {
+		case errors.Is(msg.err, errLoggedOut):
+			r.usage, r.at = nil, time.Time{}
+		case msg.usage != nil:
+			r.usage, r.at = msg.usage, msg.usage.FetchedAt
+		}
+		// Retry on our own once a rate-limit lockout ends.
+		var rl *rateLimitError
+		if errors.As(msg.err, &rl) {
+			idx := msg.idx
+			return m, tea.Tick(time.Until(rl.Until)+time.Second, func(time.Time) tea.Msg { return retryMsg{idx} })
+		}
+	case retryMsg:
+		if !m.rows[msg.idx].fetching {
+			return m, m.fetch(msg.idx)
 		}
 	case loginDoneMsg:
 		m.status = ""
 		if msg.err != nil {
 			m.status = "login failed: " + msg.err.Error()
 		}
+		accounts[msg.idx].Invalidate()
 		return m, m.fetch(msg.idx)
 	case tea.KeyMsg:
 		return m, m.handleKey(msg.String())

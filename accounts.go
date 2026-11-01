@@ -33,7 +33,9 @@ type Account struct {
 	// provider's stock dir (~/.claude or ~/.codex) with the variable unset.
 	Dir string
 
-	mu sync.Mutex // serializes fetch+refresh so two refreshes never race
+	mu           sync.Mutex // serializes fetch+refresh so two refreshes never race
+	cached       *Usage
+	blockedUntil time.Time // set from Retry-After on HTTP 429
 }
 
 // accounts is loaded from the config file at startup.
@@ -104,8 +106,9 @@ type Limit struct {
 }
 
 type Usage struct {
-	Plan   string
-	Limits []Limit
+	Plan      string
+	Limits    []Limit
+	FetchedAt time.Time
 }
 
 // errLoggedOut means there are no usable credentials: none stored, or the
@@ -115,16 +118,53 @@ var errLoggedOut = errors.New("logged out")
 // errUnauthorized is returned by usage fetchers on HTTP 401.
 var errUnauthorized = errors.New("unauthorized")
 
+// minFetchGap is the shortest time between real requests for one account.
+// The Claude usage endpoint allows only a handful of calls per token before
+// locking it out for minutes, so repeated refreshes reuse the last result.
+const minFetchGap = 30 * time.Second
+
 // Fetch returns usage, refreshing the access token first if it has expired
 // or the server rejects it. Refreshed tokens are saved back so the CLI
-// picks them up too.
+// picks them up too. While the account is rate limited, or if it was
+// fetched less than minFetchGap ago, it returns the last result instead of
+// calling the server. A rate-limited fetch returns the stale usage along
+// with a *rateLimitError.
 func (a *Account) Fetch(ctx context.Context) (*Usage, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.Provider == Codex {
-		return fetchCodex(ctx, a)
+	now := time.Now()
+	if now.Before(a.blockedUntil) {
+		return a.cached, &rateLimitError{Until: a.blockedUntil}
 	}
-	return fetchClaude(ctx, a)
+	if a.cached != nil && now.Sub(a.cached.FetchedAt) < minFetchGap {
+		return a.cached, nil
+	}
+	var u *Usage
+	var err error
+	if a.Provider == Codex {
+		u, err = fetchCodex(ctx, a)
+	} else {
+		u, err = fetchClaude(ctx, a)
+	}
+	var rl *rateLimitError
+	switch {
+	case errors.As(err, &rl):
+		a.blockedUntil = rl.Until
+		return a.cached, err
+	case err != nil:
+		return nil, err
+	}
+	u.FetchedAt = now
+	a.cached = u
+	return u, nil
+}
+
+// Invalidate drops the cached result so the next Fetch hits the server
+// (unless the account is rate limited). Used after logging in.
+func (a *Account) Invalidate() {
+	a.mu.Lock()
+	a.cached = nil
+	a.mu.Unlock()
 }
 
 func tokenExpired(exp time.Time) bool {

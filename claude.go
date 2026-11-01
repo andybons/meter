@@ -13,7 +13,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -251,6 +253,9 @@ func postJSON(ctx context.Context, url string, body any, hdr map[string]string, 
 // doJSON decodes a 200 response. For token endpoints (isToken), a 400/401
 // means the refresh token is dead, which is reported as errLoggedOut.
 func doJSON(req *http.Request, out any, isToken bool) error {
+	if err := waitTurn(req.Context(), req.URL.Host); err != nil {
+		return err
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
@@ -263,8 +268,53 @@ func doJSON(req *http.Request, out any, isToken bool) error {
 		return errLoggedOut
 	case resp.StatusCode == http.StatusUnauthorized:
 		return errUnauthorized
+	case resp.StatusCode == http.StatusTooManyRequests:
+		return &rateLimitError{Until: time.Now().Add(retryAfter(resp.Header.Get("Retry-After")))}
 	}
 	return fmt.Errorf("%s: %s", req.URL.Host, resp.Status)
+}
+
+// rateLimitError reports an HTTP 429 and when it's OK to try again.
+type rateLimitError struct{ Until time.Time }
+
+func (e *rateLimitError) Error() string { return "rate limited" }
+
+// retryAfter parses a Retry-After header (seconds or an HTTP date),
+// defaulting to a minute.
+func retryAfter(v string) time.Duration {
+	if s, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && s > 0 {
+		return time.Duration(s) * time.Second
+	}
+	if t, err := http.ParseTime(v); err == nil && time.Until(t) > 0 {
+		return time.Until(t)
+	}
+	return time.Minute
+}
+
+// requestSpacing is the minimum gap between requests to the same host, so
+// refreshing every account at once doesn't arrive as a burst.
+const requestSpacing = 750 * time.Millisecond
+
+var throttle = struct {
+	sync.Mutex
+	next map[string]time.Time
+}{next: map[string]time.Time{}}
+
+// waitTurn reserves the next request slot for host and sleeps until it.
+func waitTurn(ctx context.Context, host string) error {
+	throttle.Lock()
+	t := throttle.next[host]
+	if now := time.Now(); t.Before(now) {
+		t = now
+	}
+	throttle.next[host] = t.Add(requestSpacing)
+	throttle.Unlock()
+	select {
+	case <-time.After(time.Until(t)):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func writeFileAtomic(path string, b []byte) error {

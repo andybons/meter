@@ -107,6 +107,9 @@ func panel(width int, border lipgloss.Color, topL, topR, botL []string, body []s
 }
 
 func compactDur(d time.Duration) string {
+	if d > 0 && d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
 	d = d.Round(time.Minute)
 	switch {
 	case d <= 0:
@@ -138,7 +141,7 @@ func (m *model) accountLines(i, inner int) []string {
 	switch {
 	case r.fetching && r.usage == nil && r.err == nil:
 		dot = sDim.Render("○")
-	case errors.Is(r.err, errLoggedOut):
+	case errors.Is(r.err, errLoggedOut), errors.As(r.err, new(*rateLimitError)):
 		dot = sWarn.Render("●")
 	case r.err != nil:
 		dot = sErr.Render("●")
@@ -163,16 +166,23 @@ func (m *model) accountLines(i, inner int) []string {
 
 	const labelW, pctW, resetW = 15, 5, 9
 	barW := max(6, inner-4-labelW-pctW-resetW-3)
+	var rl *rateLimitError
 	switch {
 	case errors.Is(r.err, errLoggedOut):
 		lines = append(lines, "    "+sWarn.Render("logged out")+sDim.Render(" · press ")+sHi.Render("⏎")+sDim.Render(" to log in"))
+		return lines
+	case errors.As(r.err, &rl):
+		lines = append(lines, "    "+sWarn.Render("rate limited")+sDim.Render(" · retrying in "+compactDur(rl.Until.Sub(m.now))))
 	case r.err != nil:
 		lines = append(lines, "    "+sErr.Render(r.err.Error()))
-	case r.usage == nil:
+	}
+	// Last known usage stays visible through errors and rate limits.
+	switch {
+	case r.usage == nil && r.err == nil:
 		lines = append(lines, "    "+sDim.Render("loading…"))
-	case len(r.usage.Limits) == 0:
+	case r.usage != nil && len(r.usage.Limits) == 0:
 		lines = append(lines, "    "+sDim.Render("no limits reported"))
-	default:
+	case r.usage != nil:
 		for _, l := range r.usage.Limits {
 			ls := sFg
 			if !l.Active {
