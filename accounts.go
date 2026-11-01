@@ -118,10 +118,17 @@ var errLoggedOut = errors.New("logged out")
 // errUnauthorized is returned by usage fetchers on HTTP 401.
 var errUnauthorized = errors.New("unauthorized")
 
-// minFetchGap is the shortest time between real requests for one account.
-// The Claude usage endpoint allows only a handful of calls per token before
-// locking it out for minutes, so repeated refreshes reuse the last result.
-const minFetchGap = 30 * time.Second
+// minFetchGap is the shortest time between real requests for one account;
+// refreshes inside it reuse the last result. The Claude usage endpoint
+// allows only about five calls per token every five minutes (and running
+// Claude Code sessions share that budget), so spacing requests apart within
+// one refresh doesn't help: each account has to be asked less often.
+func (a *Account) minFetchGap() time.Duration {
+	if a.Provider == Claude {
+		return 2 * time.Minute
+	}
+	return 30 * time.Second
+}
 
 // Fetch returns usage, refreshing the access token first if it has expired
 // or the server rejects it. Refreshed tokens are saved back so the CLI
@@ -136,7 +143,7 @@ func (a *Account) Fetch(ctx context.Context) (*Usage, error) {
 	if now.Before(a.blockedUntil) {
 		return a.cached, &rateLimitError{Until: a.blockedUntil}
 	}
-	if a.cached != nil && now.Sub(a.cached.FetchedAt) < minFetchGap {
+	if a.cached != nil && now.Sub(a.cached.FetchedAt) < a.minFetchGap() {
 		return a.cached, nil
 	}
 	var u *Usage

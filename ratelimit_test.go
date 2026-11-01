@@ -25,7 +25,7 @@ func TestFetchRespectsLockoutWithoutCallingServer(t *testing.T) {
 }
 
 func TestFetchReusesRecentResult(t *testing.T) {
-	cached := &Usage{Plan: "max", FetchedAt: time.Now().Add(-5 * time.Second)}
+	cached := &Usage{Plan: "max", FetchedAt: time.Now().Add(-90 * time.Second)} // inside Claude's 2m gap
 	a := &Account{Provider: Claude, Dir: t.TempDir(), cached: cached}
 	if u, err := a.Fetch(context.Background()); err != nil || u != cached {
 		t.Fatalf("got %v, %v; want cached result", u, err)

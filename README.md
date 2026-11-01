@@ -16,7 +16,9 @@ A btop-style terminal dashboard for plan usage limits across several
 ```
 
 - Shows every limit window (session, weekly, per-model) with time to reset.
-- Refreshes on a timer and on demand.
+- Refreshes on a timer and on demand. Each Claude account is asked at most
+  every 2 minutes, since its usage endpoint allows only a few calls per
+  token every 5 minutes; refreshes in between show the last result.
 - Refreshes expired OAuth tokens and saves them back, so the `claude` and
   `codex` CLIs keep working.
 - Runs `claude auth login` / `codex login` for signed-out accounts.
