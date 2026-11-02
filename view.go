@@ -200,22 +200,47 @@ func (m *model) accountLines(i, inner int) []string {
 	return lines
 }
 
-func (m *model) providerPanel(p Provider, width, minBody int) string {
-	inner := width - 2
-	var body []string
+// panelBody returns p's account lines, with a blank line between accounts
+// when spaced, and the line range [selFrom, selTo) of the selected account
+// (selFrom = -1 if it isn't in this panel).
+func (m *model) panelBody(p Provider, inner int, spaced bool) (body []string, selFrom, selTo int) {
+	selFrom = -1
 	for i, a := range accounts {
 		if a.Provider != p {
 			continue
 		}
-		if len(body) > 0 {
+		if len(body) > 0 && spaced {
 			body = append(body, "")
 		}
+		if i == m.cursor {
+			selFrom = len(body)
+		}
 		body = append(body, m.accountLines(i, inner)...)
+		if i == m.cursor {
+			selTo = len(body)
+		}
 	}
-	for len(body) < minBody {
-		body = append(body, "")
-	}
+	return body, selFrom, selTo
+}
 
+// clipBody keeps at most n lines of body, scrolled so the selected account
+// stays in view. It reports whether lines were hidden above and below.
+func clipBody(body []string, n, selFrom, selTo int) (out []string, above, below bool) {
+	if len(body) <= n {
+		return body, false, false
+	}
+	n = max(n, 0)
+	off := 0
+	if selFrom >= 0 {
+		if selTo > n {
+			off = selTo - n
+		}
+		off = min(off, selFrom)
+	}
+	return body[off : off+n], off > 0, off+n < len(body)
+}
+
+func (m *model) providerPanel(p Provider, width int, body []string, above, below bool) string {
 	num, name, color := "¹", "claude", claudeBx
 	if p == Codex {
 		num, name, color = "²", "codex", codexBx
@@ -232,38 +257,98 @@ func (m *model) providerPanel(p Provider, width, minBody int) string {
 			botL = append(botL, sWarn.Render(m.status))
 		}
 	}
+	switch {
+	case above && below:
+		botL = append(botL, sDim.Render("↕ more"))
+	case above:
+		botL = append(botL, sDim.Render("↑ more"))
+	case below:
+		botL = append(botL, sDim.Render("↓ more"))
+	}
 	return panel(width, color, topL, topR, botL, body)
 }
 
+// View always fits the window: an alt-screen frame taller than the terminal
+// scrolls, which leaves stale lines in the scrollback. When the accounts
+// don't fit, the blank lines between them go first, then each panel shows a
+// window around the selected account.
 func (m *model) View() string {
-	w := m.width
+	w, h := m.width, m.height
 	if w == 0 {
 		w = 100
 	}
+	if h == 0 {
+		h = 1 << 20
+	}
 	// Side by side when there's room for two readable panels, else stacked.
-	if w >= 150 {
-		lw := w / 2
-		h := max(m.bodyLen(Claude), m.bodyLen(Codex))
-		return lipgloss.JoinHorizontal(lipgloss.Top,
-			m.providerPanel(Claude, lw, h), m.providerPanel(Codex, w-lw, h))
+	side := w >= 150
+	lw := w
+	if side {
+		lw = w / 2
 	}
-	return m.providerPanel(Claude, w, 0) + "\n" + m.providerPanel(Codex, w, 0)
-}
+	widths := map[Provider]int{Claude: lw, Codex: w - lw}
+	if !side {
+		widths[Codex] = w
+	}
+	type pb struct {
+		body           []string
+		selFrom, selTo int
+	}
+	var b map[Provider]pb
+	fits := func() bool {
+		c, x := len(b[Claude].body), len(b[Codex].body)
+		if side {
+			return max(c, x)+2 <= h
+		}
+		return c+x+4 <= h
+	}
+	for _, spaced := range []bool{true, false} {
+		b = map[Provider]pb{}
+		for _, p := range []Provider{Claude, Codex} {
+			body, f, t := m.panelBody(p, widths[p]-2, spaced)
+			b[p] = pb{body, f, t}
+		}
+		if fits() {
+			break
+		}
+	}
 
-// bodyLen is the number of body lines a provider's panel needs, used to give
-// side-by-side panels equal height.
-func (m *model) bodyLen(p Provider) int {
-	var n int
-	for i, a := range accounts {
-		if a.Provider != p {
-			continue
+	// Line budget per panel body.
+	budget := map[Provider]int{}
+	if side {
+		budget[Claude], budget[Codex] = h-2, h-2
+	} else {
+		avail := h - 4
+		sel, other := Claude, Codex
+		if b[Codex].selFrom >= 0 {
+			sel, other = Codex, Claude
 		}
-		if n > 0 {
-			n++
-		}
-		n += len(m.accountLines(i, 80))
+		// The selected panel gets what it needs, but at least half.
+		budget[sel] = min(len(b[sel].body), max(avail-len(b[other].body), (avail+1)/2))
+		budget[other] = avail - budget[sel]
 	}
-	return n
+	panels := map[Provider]string{}
+	for _, p := range []Provider{Claude, Codex} {
+		body, above, below := clipBody(b[p].body, budget[p], b[p].selFrom, b[p].selTo)
+		if side {
+			// Pad so side-by-side panels are the same height.
+			for n := min(max(len(b[Claude].body), len(b[Codex].body)), h-2); len(body) < n; {
+				body = append(body, "")
+			}
+		}
+		panels[p] = m.providerPanel(p, widths[p], body, above, below)
+	}
+	var out string
+	if side {
+		out = lipgloss.JoinHorizontal(lipgloss.Top, panels[Claude], panels[Codex])
+	} else {
+		out = panels[Claude] + "\n" + panels[Codex]
+	}
+	// Last resort for windows too short for even the borders.
+	if lines := strings.Split(out, "\n"); len(lines) > h {
+		out = strings.Join(lines[:h], "\n")
+	}
+	return out
 }
 
 func fmtInterval(d time.Duration) string {
