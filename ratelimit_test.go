@@ -67,7 +67,7 @@ func TestRenderRateLimited(t *testing.T) {
 	now := time.Now()
 	m := &model{rows: make([]row, len(accounts)), now: now, ivIdx: 2, width: 100}
 	m.rows[0] = row{
-		usage: &Usage{Plan: "max 20x", Limits: []Limit{{"Weekly", 61, now.Add(28 * time.Hour), true}}, FetchedAt: now},
+		usage: &Usage{Plan: "ultra", Limits: []Limit{{"Weekly", 61, now.Add(28 * time.Hour), true}}, FetchedAt: now},
 		err:   &rateLimitError{Until: now.Add(4*time.Minute + 10*time.Second)},
 	}
 	out := m.View()

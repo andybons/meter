@@ -134,3 +134,17 @@ func TestFmtInterval(t *testing.T) {
 		}
 	}
 }
+
+func TestClaudePlan(t *testing.T) {
+	for _, c := range []struct{ sub, tier, want string }{
+		{"max", "default_claude_max_20x", "ultra"},
+		{"max", "default_claude_max_5x", "max 5x"},
+		{"team", "default_claude_team_5x", "team 5x"},
+		{"pro", "default_claude_pro", "pro"},
+	} {
+		o := map[string]any{"subscriptionType": c.sub, "rateLimitTier": c.tier}
+		if got := claudePlan(o); got != c.want {
+			t.Errorf("claudePlan(%q, %q) = %q, want %q", c.sub, c.tier, got, c.want)
+		}
+	}
+}

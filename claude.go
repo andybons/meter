@@ -219,11 +219,13 @@ func claudeLabel(kind, group string) string {
 	return strings.ReplaceAll(kind, "_", " ")
 }
 
+// claudePlan names the plan the way Claude does. The 20x tier is now
+// called Ultra; the others are the subscription type plus its multiplier.
 func claudePlan(o map[string]any) string {
 	sub, tier := str(o, "subscriptionType"), str(o, "rateLimitTier")
 	switch {
 	case strings.HasSuffix(tier, "20x"):
-		return sub + " 20x"
+		return "ultra"
 	case strings.HasSuffix(tier, "5x"):
 		return sub + " 5x"
 	}
