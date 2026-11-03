@@ -1,6 +1,7 @@
 # make          format, then check: the everyday loop
 # make check    what CI runs: fails on any lint error, warning or test failure
 # make app      build Meter.app (needed for screenshots of the menu bar item)
+# make install  copy Meter.app to /Applications, where it can open at login
 NAME := Meter
 SRC := Sources Tests Package.swift
 APP := .build/$(NAME).app
@@ -13,7 +14,7 @@ MIN := 15.0
 SDK := $(shell xcrun --show-sdk-version)
 SWIFTFLAGS := -Xlinker -platform_version -Xlinker macos -Xlinker $(MIN) -Xlinker $(SDK)
 
-.PHONY: all fmt lint build test check app run clean
+.PHONY: all fmt lint build test check app icon run install clean
 all: fmt check
 
 fmt:
@@ -30,16 +31,28 @@ test:
 
 check: lint build test
 
-app:
+icon:
+	rm -rf .build/AppIcon.iconset
+	swift scripts/make-icon.swift .build/AppIcon.iconset
+	iconutil -c icns .build/AppIcon.iconset -o .build/AppIcon.icns
+
+app: icon
 	swift build -c release $(SWIFTFLAGS)
 	rm -rf $(APP)
-	mkdir -p $(APP)/Contents/MacOS
+	mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Resources
 	cp Support/Info.plist $(APP)/Contents/
+	cp .build/AppIcon.icns $(APP)/Contents/Resources/
 	cp .build/release/$(NAME) $(APP)/Contents/MacOS/
 	codesign --force --sign - $(APP)
 
 run: app
 	open $(APP)
+
+install: app
+	-pkill -x $(NAME)
+	rm -rf /Applications/$(NAME).app
+	cp -R $(APP) /Applications/
+	open /Applications/$(NAME).app
 
 clean:
 	rm -rf .build

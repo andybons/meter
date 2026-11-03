@@ -1,13 +1,22 @@
 import AppKit
 import MeterCore
 
-/// The single Settings window: the auto-refresh interval.
+/// The single Settings window: opening at login and the auto-refresh interval.
 final class SettingsWindowController: NSWindowController {
   private let onChange: (RefreshInterval) -> Void
   private let popup = NSPopUpButton(frame: .zero, pullsDown: false)
+  private let loginItem: any LoginItemService
+  private let loginCheckbox = NSButton(checkboxWithTitle: "Open at Login", target: nil, action: nil)
+  private let loginNote = NSTextField(wrappingLabelWithString: "")
+  private let approveButton = NSButton(
+    title: "Open Login Items Settings…", target: nil, action: nil)
 
-  init(current: @escaping () -> RefreshInterval, onChange: @escaping (RefreshInterval) -> Void) {
+  init(
+    current: @escaping () -> RefreshInterval, onChange: @escaping (RefreshInterval) -> Void,
+    loginItem: any LoginItemService
+  ) {
     self.onChange = onChange
+    self.loginItem = loginItem
     let window = NSWindow(
       contentRect: NSRect(x: 0, y: 0, width: 380, height: 120),
       styleMask: [.titled, .closable],
@@ -33,12 +42,27 @@ final class SettingsWindowController: NSWindowController {
     )
     note.font = .systemFont(ofSize: 11)
     note.textColor = .secondaryLabelColor
-    note.preferredMaxLayoutWidth = 340
-    let stack = NSStackView(views: [row, note])
+    note.preferredMaxLayoutWidth = 300
+    loginCheckbox.target = self
+    loginCheckbox.action = #selector(toggleLogin(_:))
+    loginNote.font = .systemFont(ofSize: 11)
+    loginNote.textColor = .secondaryLabelColor
+    loginNote.preferredMaxLayoutWidth = 300
+    approveButton.target = self
+    approveButton.action = #selector(openLoginItems(_:))
+    approveButton.controlSize = .small
+    let login = NSStackView(views: [loginCheckbox, loginNote, approveButton])
+    login.orientation = .vertical
+    login.alignment = .leading
+    login.spacing = 6
+    let stack = NSStackView(views: [login, row, note])
     stack.orientation = .vertical
     stack.alignment = .leading
     stack.spacing = 12
+    stack.setCustomSpacing(20, after: login)
     stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
+    // A fixed width keeps the 20-point margins: notes wrap at 300 points.
+    stack.widthAnchor.constraint(equalToConstant: 340).isActive = true
     window.contentView = stack
     window.setContentSize(stack.fittingSize)
     self.current = current
@@ -47,6 +71,33 @@ final class SettingsWindowController: NSWindowController {
   private var current: (() -> RefreshInterval)?
 
   required init?(coder: NSCoder) { nil }
+
+  /// Shows the system's current login-item status.
+  ///
+  /// The status is read fresh each time, since the user can change it in
+  /// System Settings while this window is closed.
+  private func renderLoginItem() {
+    let d = LoginItemDisplay(status: loginItem.status, appPath: Bundle.main.bundlePath)
+    loginCheckbox.state = d.isOn ? .on : .off
+    loginCheckbox.isEnabled = d.isEnabled
+    loginNote.stringValue = d.note ?? ""
+    loginNote.isHidden = d.note == nil
+    approveButton.isHidden = !d.offersSystemSettings
+    window?.setContentSize(window?.contentView?.fittingSize ?? .zero)
+  }
+
+  @objc private func toggleLogin(_ sender: NSButton) {
+    do {
+      try loginItem.setEnabled(sender.state == .on)
+    } catch {
+      if let window { NSAlert(error: error).beginSheetModal(for: window) }
+    }
+    renderLoginItem()
+  }
+
+  @objc private func openLoginItems(_ sender: Any?) {
+    SystemLoginItem.openSystemSettings()
+  }
 
   @objc private func changed(_ sender: NSPopUpButton) {
     let i = sender.indexOfSelectedItem
@@ -63,6 +114,7 @@ final class SettingsWindowController: NSWindowController {
     if window?.isVisible == false, window?.setFrameUsingName("settings") == false {
       window?.center()
     }
+    renderLoginItem()
     NSApp.activate()
     showWindow(nil)
   }

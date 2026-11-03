@@ -3,6 +3,7 @@
 <plist version="1.0">
 <dict>
   <key>CFBundleExecutable</key><string>Meter</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleIdentifier</key><string>com.andybons.Meter</string>
   <key>CFBundleName</key><string>Meter</string>
   <key>CFBundlePackageType</key><string>APPL</string>

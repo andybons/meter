@@ -8,7 +8,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
   private var status: StatusController?
   private lazy var settings = SettingsWindowController(
     current: { [model] in model.interval },
-    onChange: { [model] in model.setInterval($0) })
+    onChange: { [model] in model.setInterval($0) },
+    loginItem: SystemLoginItem())
 
   /// Creates the delegate. `makeFetcher` builds the rate-limited fetcher for an account.
   public init(
