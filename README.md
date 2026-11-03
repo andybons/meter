@@ -1,8 +1,10 @@
 # meter
 
-A btop-style terminal dashboard for plan usage limits across several
+See plan usage limits across several
 [Claude Code](https://claude.com/claude-code) and
-[Codex](https://github.com/openai/codex) accounts.
+[Codex](https://github.com/openai/codex) accounts, in a btop-style terminal
+dashboard or a native [macOS menu bar app](#menu-bar-app). Both read the same
+config and credentials.
 
 ```
 ╭─┐¹claude┌──────────────────────────────────────────────┐10:21:42┌╮
@@ -92,29 +94,64 @@ meter -every 30s            # override the refresh interval
 
 ## Menu bar app
 
-`macos/` holds a native macOS version: a gauge in the menu bar whose menu
-shows every account's limits, using the same config file, credentials and
-rate-limit rules as the terminal version.
+`macos/` holds Meter, a native macOS app that lives in the menu bar as a
+gauge. The gauge fills with overall usage; click it for every account's
+limits.
+
+- One section per provider, with its logo, and one row per account with a
+  plan badge (Ultra, Max 5x, Pro, Team).
+- Each active limit on one line: a bar, the percentage used and the time to
+  reset, lined up in columns. Bars turn orange at 75% and red at 90%; a
+  maxed-out limit says "Full".
+- Rate-limited accounts keep their last numbers and show when they'll retry;
+  signed-out accounts get a "Log In…" item that opens Terminal with the
+  right login command.
+- Settings: Open at Login, and how often to refresh (30 seconds to 10
+  minutes). "Open Config File" opens `config.toml`, creating a starter one
+  if needed.
+
+It needs macOS 15 or later and Xcode. To install it in /Applications and
+start it:
 
 ```sh
 cd macos
-make app && open .build/Meter.app
+make install
 ```
 
-It needs macOS 15 or later and the Xcode toolchain. Run `make check` to
-format-check, build and test it.
+Then turn on **Open at Login** in Settings (⌘, from the menu) to start it
+automatically. macOS may ask you to allow it in System Settings.
+
+Development:
+
+| Command | Does |
+|---|---|
+| `make` | format, then check |
+| `make check` | lint, strict build and tests |
+| `make app` | build `.build/Meter.app`, including its icon |
+| `make run` | build and open the app from `.build` |
+
+The app is a Swift package: `MeterCore` holds the config, credentials,
+fetching and display logic with no AppKit, and has the tests; `MeterUI` is
+the AppKit menu, views and Settings; `Meter` wires them together.
 
 ## How it works
 
 - **Claude**: reads the credentials Claude Code stores in the Keychain
   (`Claude Code-credentials`, with a `-<sha256(dir)[:8]>` suffix for custom
   dirs) and calls `api.anthropic.com/api/oauth/usage`.
+- **Keychain**: both versions read and write it through `/usr/bin/security`,
+  which Claude Code's entries already trust, so there's no password prompt
+  per account.
 - **Codex**: reads `<dir>/auth.json` and calls
   `chatgpt.com/backend-api/wham/usage`. Logins started from meter set
   `cli_auth_credentials_store="file"` so the file exists.
 - **Tokens**: refresh tokens rotate on use, so refreshed tokens are written
   back to where the CLI reads them. If the CLI refreshed at the same time,
   meter uses the CLI's newer token instead.
+- **Rate limits**: each Claude account is asked at most every 2 minutes and
+  each Codex account every 30 seconds, requests to one host are spaced
+  apart, and a 429 response's `Retry-After` is honored while the last
+  numbers stay on screen.
 - **Login**: runs with `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` removed so
   you sign in with your subscription, not API billing.
 
