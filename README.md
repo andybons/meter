@@ -98,6 +98,10 @@ meter -every 30s            # override the refresh interval
 gauge. The gauge fills with overall usage; click it for every account's
 limits.
 
+<p align="center">
+  <img src="docs/menu.png" width="340" alt="Meter's menu: Claude and Codex sections with each account's plan badge and a bar, percentage used and time to reset for each limit; one limit is orange at 84% and one is red and Full.">
+</p>
+
 - One section per provider, with its logo, and one row per account with a
   plan badge (Ultra, Max 5x, Pro, Team).
 - Each active limit on one line: a bar, the percentage used and the time to
@@ -129,6 +133,10 @@ Development:
 | `make check` | lint, strict build and tests |
 | `make app` | build `.build/Meter.app`, including its icon |
 | `make run` | build and open the app from `.build` |
+
+`open .build/Meter.app --args --demo` shows sample accounts instead of
+yours, without reading any config, credentials or network; that's how the
+screenshot above was made.
 
 The app is a Swift package: `MeterCore` holds the config, credentials,
 fetching and display logic with no AppKit, and has the tests; `MeterUI` is
