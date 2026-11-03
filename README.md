@@ -6,7 +6,7 @@ A btop-style terminal dashboard for plan usage limits across several
 
 ```
 ╭─┐¹claude┌──────────────────────────────────────────────┐10:21:42┌╮
-│▶ ● you@example.com                              max 20x  now │
+│▶ ● you@example.com                                ultra  now │
 │    Weekly         ■■■■■■■■■■■■■■■■■■■■■■■■■   61% ↻ 1d 4h    │
 │                                                              │
 │  ● you@work.example                             team 5x  now │
@@ -89,6 +89,20 @@ meter -every 30s            # override the refresh interval
 | `l` | log in to the selected account |
 | `-` / `+` | change the refresh interval |
 | `q` | quit |
+
+## Menu bar app
+
+`macos/` holds a native macOS version: a gauge in the menu bar whose menu
+shows every account's limits, using the same config file, credentials and
+rate-limit rules as the terminal version.
+
+```sh
+cd macos
+make app && open .build/Meter.app
+```
+
+It needs macOS 15 or later and the Xcode toolchain. Run `make check` to
+format-check, build and test it.
 
 ## How it works
 
