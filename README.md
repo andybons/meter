@@ -1,40 +1,46 @@
 # meter
 
-See plan usage limits across several
+Plan usage limits across all your
 [Claude Code](https://claude.com/claude-code) and
-[Codex](https://github.com/openai/codex) accounts, in a btop-style terminal
-dashboard or a native [macOS menu bar app](#menu-bar-app). Both read the same
-config and credentials.
+[Codex](https://github.com/openai/codex) accounts, in your Mac's menu bar.
 
-```
-╭─┐¹claude┌──────────────────────────────────────────────┐10:21:42┌╮
-│▶ ● you@example.com                                ultra  now │
-│    Weekly         ■■■■■■■■■■■■■■■■■■■■■■■■■   61% ↻ 1d 4h    │
-│                                                              │
-│  ● you@work.example                             team 5x  now │
-│    Session        ■■■■■■■■■■■■■■■■■■■■■■■■■  100% ↻ 1h 24m   │
-│    Weekly         ■■■■■■■■■■■■■■■■■■■■■■■■■   28% ↻ 5d 12h   │
-╰─┐↑ select ↓┌┐login┌┐refresh┌─────────────────────────────────╯
-```
+<p align="center">
+  <img src="docs/menu.png" width="340" alt="Meter's menu: Claude and Codex sections with each account's plan badge and a bar, percentage used and time to reset for each limit; one limit is orange at 84% and one is red and Full.">
+</p>
 
-- Shows every limit window (session, weekly, per-model) with time to reset.
-- Refreshes on a timer and on demand. Each Claude account is asked at most
-  every 2 minutes, since its usage endpoint allows only a few calls per
-  token every 5 minutes; refreshes in between show the last result.
-- Refreshes expired OAuth tokens and saves them back, so the `claude` and
+Meter sits in the menu bar as a gauge that fills with your overall usage.
+Click it to see every account:
+
+- One section per provider, with one row per account and its plan (Ultra,
+  Max 5x, Pro, Team).
+- Each limit (session, weekly) on one line: how much is used and when it
+  resets, lined up so accounts compare at a glance. Bars turn orange at 75%
+  and red at 90%; a maxed-out limit says "Full".
+- Refreshes on a timer and on demand, without tripping the usage
+  endpoints' rate limits.
+- Refreshes expired sign-ins and saves them back, so the `claude` and
   `codex` CLIs keep working.
-- Runs `claude auth login` / `codex login` for signed-out accounts.
+- Signed-out accounts get a "Log In…" item that opens Terminal with the
+  right login command.
+
+Prefer the terminal? There's also a btop-style
+[terminal dashboard](#terminal-dashboard) that reads the same config.
 
 ## Install
 
+Meter needs macOS 15 or later and Xcode (for the Swift toolchain).
+
 ```sh
-go install github.com/andybons/meter@latest
+git clone https://github.com/andybons/meter.git
+cd meter/macos
+make install
 ```
 
-macOS is the primary target: Claude Code credentials are read from the
-Keychain. On Linux, `.credentials.json` in the config dir is used instead.
+This builds Meter, copies it to /Applications and starts it. To start it
+automatically, open Settings from its menu (⌘,) and turn on **Open at
+Login**; macOS may ask you to allow it in System Settings.
 
-## Setup
+## Set up your accounts
 
 Each account needs its own config dir, set with `CLAUDE_CONFIG_DIR` (Claude
 Code) or `CODEX_HOME` (Codex). The default `~/.claude` and `~/.codex` count
@@ -47,14 +53,8 @@ CLAUDE_CONFIG_DIR=$HOME/.claude-you@work.example claude auth login
 CODEX_HOME=$HOME/.codex-you@work.example codex login
 ```
 
-Then generate a config from the logins meter can find (`~/.claude`,
-`~/.codex`, and any `~/.claude-*` or `~/.codex-*` dir):
-
-```sh
-meter -init
-```
-
-Or write `~/.config/meter/config.toml` by hand:
+Then list your accounts in `~/.config/meter/config.toml`. Choose **Open
+Config File** from Meter's menu to create and open it:
 
 ```toml
 refresh = "2m"   # optional: 30s, 1m, 2m, 5m or 10m
@@ -70,17 +70,40 @@ dir   = "~/.claude-you@work.example"
 email = "you@example.com"            # no dir: the default ~/.codex
 ```
 
-`email` is the label shown in the dashboard. `dir` must be absolute or
-start with `~/`. Use the same path you pass as `CLAUDE_CONFIG_DIR`, because
-Claude Code names its Keychain entry after it.
+`email` is the label shown for the account. `dir` must be absolute or start
+with `~/`. Use the same path you pass as `CLAUDE_CONFIG_DIR`, because Claude
+Code names its Keychain entry after it. Meter picks up changes on its next
+refresh.
 
-## Usage
+With the terminal dashboard installed, `meter -init` writes this file for
+you from the logins it finds (`~/.claude`, `~/.codex`, and any `~/.claude-*`
+or `~/.codex-*` dir).
+
+## Terminal dashboard
+
+The same information as a btop-style terminal UI, for when you'd rather
+stay in the terminal or aren't on a Mac.
+
+```
+╭─┐¹claude┌──────────────────────────────────────────────┐10:21:42┌╮
+│▶ ● you@example.com                                ultra  now │
+│    Weekly         ■■■■■■■■■■■■■■■■■■■■■■■■■   61% ↻ 1d 4h    │
+│                                                              │
+│  ● you@work.example                             team 5x  now │
+│    Session        ■■■■■■■■■■■■■■■■■■■■■■■■■  100% ↻ 1h 24m   │
+│    Weekly         ■■■■■■■■■■■■■■■■■■■■■■■■■   28% ↻ 5d 12h   │
+╰─┐↑ select ↓┌┐login┌┐refresh┌─────────────────────────────────╯
+```
 
 ```sh
+go install github.com/andybons/meter@latest
 meter                       # uses ~/.config/meter/config.toml
 meter -config path.toml
 meter -every 30s            # override the refresh interval
 ```
+
+On Linux, Claude Code credentials are read from `.credentials.json` in the
+config dir instead of the Keychain.
 
 | Key | Action |
 |---|---|
@@ -91,56 +114,6 @@ meter -every 30s            # override the refresh interval
 | `l` | log in to the selected account |
 | `-` / `+` | change the refresh interval |
 | `q` | quit |
-
-## Menu bar app
-
-`macos/` holds Meter, a native macOS app that lives in the menu bar as a
-gauge. The gauge fills with overall usage; click it for every account's
-limits.
-
-<p align="center">
-  <img src="docs/menu.png" width="340" alt="Meter's menu: Claude and Codex sections with each account's plan badge and a bar, percentage used and time to reset for each limit; one limit is orange at 84% and one is red and Full.">
-</p>
-
-- One section per provider, with its logo, and one row per account with a
-  plan badge (Ultra, Max 5x, Pro, Team).
-- Each active limit on one line: a bar, the percentage used and the time to
-  reset, lined up in columns. Bars turn orange at 75% and red at 90%; a
-  maxed-out limit says "Full".
-- Rate-limited accounts keep their last numbers and show when they'll retry;
-  signed-out accounts get a "Log In…" item that opens Terminal with the
-  right login command.
-- Settings: Open at Login, and how often to refresh (30 seconds to 10
-  minutes). "Open Config File" opens `config.toml`, creating a starter one
-  if needed.
-
-It needs macOS 15 or later and Xcode. To install it in /Applications and
-start it:
-
-```sh
-cd macos
-make install
-```
-
-Then turn on **Open at Login** in Settings (⌘, from the menu) to start it
-automatically. macOS may ask you to allow it in System Settings.
-
-Development:
-
-| Command | Does |
-|---|---|
-| `make` | format, then check |
-| `make check` | lint, strict build and tests |
-| `make app` | build `.build/Meter.app`, including its icon |
-| `make run` | build and open the app from `.build` |
-
-`open .build/Meter.app --args --demo` shows sample accounts instead of
-yours, without reading any config, credentials or network; that's how the
-screenshot above was made.
-
-The app is a Swift package: `MeterCore` holds the config, credentials,
-fetching and display logic with no AppKit, and has the tests; `MeterUI` is
-the AppKit menu, views and Settings; `Meter` wires them together.
 
 ## How it works
 
@@ -164,6 +137,28 @@ the AppKit menu, views and Settings; `Meter` wires them together.
   you sign in with your subscription, not API billing.
 
 Both usage endpoints are undocumented and may change without notice.
+
+## Development
+
+The Mac app is a Swift package in `macos/`: `MeterCore` holds the config,
+credentials, fetching and display logic with no AppKit, and has the tests;
+`MeterUI` is the AppKit menu, views and Settings; `Meter` wires them
+together.
+
+| Command (in `macos/`) | Does |
+|---|---|
+| `make` | format, then check |
+| `make check` | lint, strict build and tests |
+| `make app` | build `.build/Meter.app`, including its icon |
+| `make run` | build and open the app from `.build` |
+| `make install` | build, copy to /Applications and start |
+
+`open .build/Meter.app --args --demo` shows sample accounts instead of
+yours, without reading any config, credentials or network; that's how the
+screenshot above was made.
+
+The terminal dashboard is the Go module at the repository root:
+`go test ./...`.
 
 ## License
 
