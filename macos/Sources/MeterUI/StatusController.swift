@@ -8,6 +8,11 @@ final class StatusController: NSObject {
   private let model: UsageModel
   private let configPath: String
   private let showSettings: () -> Void
+  // While the menu is open: the rows that show times, and the timer that
+  // re-renders them so countdowns and "updated" text stay live.
+  private var headlineItem: NSMenuItem?
+  private var accountItems: [(item: NSMenuItem, spec: AccountSpec)] = []
+  private var ticker: Timer?
 
   init(model: UsageModel, configPath: String, showSettings: @escaping () -> Void) {
     self.model = model
@@ -18,7 +23,10 @@ final class StatusController: NSObject {
     item.behavior = .removalAllowed
     menu.delegate = self
     item.menu = menu
-    model.onChange = { [weak self] in self?.render() }
+    model.onChange = { [weak self] in
+      self?.render()
+      self?.updateOpenMenu()
+    }
     render()
   }
 
@@ -32,6 +40,18 @@ final class StatusController: NSObject {
     button.toolTip = overview.headline
     button.setAccessibilityLabel("Meter")
     button.setAccessibilityValue(overview.accessibilityValue)
+  }
+
+  /// Re-renders the open menu's live rows in place; its structure is left alone.
+  private func updateOpenMenu() {
+    guard ticker != nil else { return }
+    let now = Date()
+    headlineItem?.view = makeHeadlineView(
+      model.overview.headline, updated: model.overview.updatedText(now: now))
+    for (item, spec) in accountItems {
+      guard let r = model.rows.first(where: { $0.spec == spec }) else { continue }
+      item.view = makeAccountRowView(r.display(now: now))
+    }
   }
 
   private func symbol(_ name: String) -> NSImage? {
@@ -74,9 +94,11 @@ extension StatusController: NSMenuDelegate {
   // Rebuilt before each opening so relative times ("resets in 3h") are current.
   func menuNeedsUpdate(_ menu: NSMenu) {
     menu.removeAllItems()
+    accountItems = []
     let now = Date()
 
     let headline = NSMenuItem()
+    headlineItem = headline
     headline.view = makeHeadlineView(
       model.overview.headline, updated: model.overview.updatedText(now: now))
     menu.addItem(headline)
@@ -99,6 +121,7 @@ extension StatusController: NSMenuDelegate {
         let row = NSMenuItem()
         row.view = makeAccountRowView(d)
         menu.addItem(row)
+        accountItems.append((row, r.spec))
         if d.needsLogin {
           let login = NSMenuItem(
             title: "Log In to \(r.spec.email)…", action: #selector(logIn(_:)), keyEquivalent: "")
@@ -133,6 +156,25 @@ extension StatusController: NSMenuDelegate {
       title: "Quit Meter", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
     quit.image = symbol("power")
     menu.addItem(quit)
+  }
+}
+
+extension StatusController {
+  // A menu tracks events in its own run loop mode, so the timer runs in
+  // .common to keep firing while it's open.
+  func menuWillOpen(_ menu: NSMenu) {
+    let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+      MainActor.assumeIsolated { self?.updateOpenMenu() }
+    }
+    RunLoop.main.add(timer, forMode: .common)
+    ticker = timer
+  }
+
+  func menuDidClose(_ menu: NSMenu) {
+    ticker?.invalidate()
+    ticker = nil
+    headlineItem = nil
+    accountItems = []
   }
 }
 
